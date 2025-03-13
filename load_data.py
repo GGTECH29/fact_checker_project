@@ -1,54 +1,43 @@
 import pandas as pd
 import os
+import logging
+import sys
 
-# Pfad zum Datenordner
+# Logging konfigurieren
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Verzeichnis überprüfen
 data_dir = "data"
+if not os.path.exists(data_dir):
+    logging.error(f"Fehler: Das Verzeichnis '{data_dir}' existiert nicht.")
+    sys.exit(1)
 
-# Liste aller .txt-Dateien im Datenordner
-txt_files = []
-for root, dirs, files in os.walk(data_dir):
-    for file in files:
-        if file.endswith(".txt"):
-            txt_files.append(os.path.join(root, file))
+# CSV-Dateien laden
+csv_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith(".csv")]
+if not csv_files:
+    logging.error(f"Fehler: Das Verzeichnis '{data_dir}' enthält keine CSV-Dateien.")
+    sys.exit(1)
 
-# Lade alle .txt-Dateien
+# Daten zusammenführen
 dfs = []
-for file in txt_files:
+for file in csv_files:
     try:
-        # Versuche, die Datei mit verschiedenen Trennzeichen zu laden
-        try:
-            # Versuche Tabulator als Trennzeichen
-            df = pd.read_csv(file, sep="\t", header=None, on_bad_lines="skip")
-        except pd.errors.ParserError:
-            # Versuche Semikolon als Trennzeichen
-            df = pd.read_csv(file, sep=";", header=None, on_bad_lines="skip")
-        except pd.errors.ParserError:
-            # Versuche Komma als Trennzeichen
-            df = pd.read_csv(file, sep=",", header=None, on_bad_lines="skip")
-        except pd.errors.ParserError:
-            # Versuche Leerzeichen als Trennzeichen
-            df = pd.read_csv(file, sep=" ", header=None, on_bad_lines="skip")
-        except:
-            # Allgemeiner Fehlerfall
-            print(f"Fehler beim Laden von {file}: Unbekanntes Format")
-            continue
-
-        # Füge den DataFrame zur Liste hinzu
+        df = pd.read_csv(file)
         dfs.append(df)
+        logging.info(f"Datei '{file}' erfolgreich geladen.")
     except Exception as e:
-        print(f"Fehler beim Laden von {file}: {e}")
+        logging.error(f"Fehler beim Laden der Datei '{file}': {e}")
 
-# Überprüfe, ob Daten geladen wurden
 if not dfs:
-    print("Keine Daten gefunden. Überprüfe die Dateien im 'data'-Ordner.")
-else:
-    # Füge die DataFrames zusammen
-    df_combined = pd.concat(dfs, ignore_index=True)
+    logging.error("Keine Daten zum Zusammenführen gefunden.")
+    sys.exit(1)
 
-    # Zeige die ersten 5 Zeilen an
-    print(df_combined.head())
+df_combined = pd.concat(dfs, ignore_index=True)
 
-    # Speichere den kombinierten Datensatz
+# Daten speichern
+try:
     df_combined.to_csv("combined_data.csv", index=False)
-    print("Daten zusammengeführt und gespeichert in combined_data.csv")
-
+    logging.info("Daten erfolgreich zusammengeführt und gespeichert.")
+except Exception as e:
+    logging.error(f"Fehler beim Speichern der Daten: {e}")
+    sys.exit(1)
