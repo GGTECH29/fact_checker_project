@@ -1,64 +1,90 @@
 import pandas as pd
+from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
 from sklearn.model_selection import train_test_split
-from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification, Trainer, TrainingArguments
 import torch
+import logging
+import sys
 
-# 1. Bereinigte Daten laden
-df = pd.read_csv("clean_fake_news.csv")
+# Logging konfigurieren
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# 2. Daten in Trainings- und Testsets aufteilen
-train_texts, val_texts, train_labels, val_labels = train_test_split(
-    df["text"].tolist(), df["is_fake"].tolist(), test_size=0.2
-)
+# Daten laden
+try:
+    df = pd.read_csv("clean_fake_news.csv")
+    logging.info("Daten erfolgreich geladen.")
+except FileNotFoundError:
+    logging.error("Fehler: Die Datei 'clean_fake_news.csv' wurde nicht gefunden.")
+    sys.exit(1)
+except pd.errors.EmptyDataError:
+    logging.error("Fehler: Die Datei 'clean_fake_news.csv' ist leer oder enthält keine gültigen Daten.")
+    sys.exit(1)
 
-# 3. Tokenisierung der Texte
-tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
-train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=512)
-val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=512)
+# Überprüfen, ob die erforderlichen Spalten vorhanden sind
+required_columns = ["title", "text", "is_fake"]
+if not all(column in df.columns for column in required_columns):
+    logging.error("Fehler: Die CSV-Datei enthält nicht alle erforderlichen Spalten.")
+    sys.exit(1)
 
-# 4. Datensätze erstellen
-class FakeNewsDataset(torch.utils.data.Dataset):
+# Daten vorbereiten
+X = df["text"]
+y = df["is_fake"]
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Tokenizer und Modell laden
+tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=2)
+
+# Datensätze tokenisieren
+train_encodings = tokenizer(X_train.tolist(), truncation=True, padding=True)
+val_encodings = tokenizer(X_val.tolist(), truncation=True, padding=True)
+
+# Datensätze in PyTorch-Datensätze umwandeln
+class NewsDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels):
         self.encodings = encodings
         self.labels = labels
 
     def __getitem__(self, idx):
         item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item["labels"] = torch.tensor(self.labels[idx])
+        item['labels'] = torch.tensor(self.labels[idx])
         return item
 
     def __len__(self):
         return len(self.labels)
 
-train_dataset = FakeNewsDataset(train_encodings, train_labels)
-val_dataset = FakeNewsDataset(val_encodings, val_labels)
+train_dataset = NewsDataset(train_encodings, y_train.tolist())
+val_dataset = NewsDataset(val_encodings, y_val.tolist())
 
-# 5. Modell initialisieren
-model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=2)
-
-# 6. Training-Argumente festlegen
+# TrainingArguments und Trainer
 training_args = TrainingArguments(
     output_dir="./results",
     num_train_epochs=3,
-    per_device_train_batch_size=8,
-    evaluation_strategy="epoch",
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
     logging_dir="./logs",
-    fp16=True,  # Nur für NVIDIA-GPUs aktivieren
+    logging_steps=10,
+    evaluation_strategy="epoch"
 )
 
-# 7. Trainer initialisieren
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
-    eval_dataset=val_dataset,
+    eval_dataset=val_dataset
 )
 
-# 8. Modell trainieren
-trainer.train()
+# Modell trainieren
+try:
+    trainer.train()
+    logging.info("Modelltraining abgeschlossen.")
+except Exception as e:
+    logging.error(f"Fehler beim Modelltraining: {e}")
+    sys.exit(1)
 
-# 9. Modell speichern
-model.save_pretrained("./fake_news_model")
-tokenizer.save_pretrained("./fake_news_model")
-
-print("Modelltraining abgeschlossen und Modell gespeichert!")
+# Modell speichern
+try:
+    model.save_pretrained("./fake_news_model")
+    logging.info("Modell erfolgreich gespeichert.")
+except Exception as e:
+    logging.error(f"Fehler beim Speichern des Modells: {e}")
+    sys.exit(1)
