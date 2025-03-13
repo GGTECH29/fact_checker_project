@@ -1,27 +1,40 @@
-import gradio as gr
+import torch
 from transformers import pipeline
+import gradio as gr
+import logging
+import sys
 
-# 1. Modell laden
-classifier = pipeline("text-classification", model="./fake_news_model")
+# Logging konfigurieren
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# 2. Funktion für die Vorhersage
-def check_news(text):
-    result = classifier(text)[0]
-    label = "Fake News" if result["label"] == "LABEL_1" else "Echte Nachricht"
-    confidence = result["score"]
-    return f"{label} (Confidence: {confidence:.2f})"
+# Überprüfen, ob CUDA verfügbar ist
+device = "cuda" if torch.cuda.is_available() else "cpu"
+logging.info(f"Verwende Gerät: {device}")
 
-# 3. Gradio-Interface erstellen
-interface = gr.Interface(
-    fn=check_news,  # Funktion, die aufgerufen wird
-    inputs=gr.Textbox(lines=2, placeholder="Gib einen Text ein..."),  # Eingabefeld
-    outputs="text",  # Ausgabefeld
-    title="Fact-Checker 3000",  # Titel der UI
-    examples=[
-        ["Breaking News: A new study shows that chocolate is good for your health!"],
-        ["The moon is made of green cheese."]
-    ]
+# Modell laden
+try:
+    classifier = pipeline("text-classification", model="./fake_news_model", device=0 if device == "cuda" else -1)
+    logging.info("Modell erfolgreich geladen.")
+except Exception as e:
+    logging.error(f"Fehler beim Laden des Modells: {e}")
+    sys.exit(1)
+
+# Vorhersagefunktion
+def classify_text(text):
+    try:
+        result = classifier(text)
+        return result[0]['label']
+    except Exception as e:
+        return f"Fehler bei der Vorhersage: {e}"
+
+# Gradio-Interface
+iface = gr.Interface(
+    fn=classify_text,
+    inputs="text",
+    outputs="text",
+    title="Fake News Detector",
+    description="Geben Sie einen Text ein, um zu überprüfen, ob er Fake News enthält."
 )
 
-# 4. UI starten
-interface.launch()
+# Anwendung starten
+iface.launch()
